@@ -1,0 +1,163 @@
+#!/usr/bin/python3
+
+import argparse
+import getpass
+import hashlib
+import sys
+import unicodedata
+
+PROGRAM = "Hashpass v1.0.0"
+DESCRIPTION = (
+"""%s
+
+Generate passwords on-the-fly using a master password and identifiers."""
+) % (PROGRAM)
+EXAMPLES = (
+"""
+examples:
+  Password for example.com:
+    hashpass example.com
+
+  My password for example.com's separate bug tracker:
+    hashpass example.com bugs
+
+  Very long admin password for a database:
+    hashpass --length 50 database admin
+
+  Pin number for voice mail which only allows several digits:
+    hashpass voicemail --type numeric --length 6
+"""
+)
+
+def get_arguments():
+	"""
+	Parse command line arguments.
+	"""
+	parser = argparse.ArgumentParser(
+		description = DESCRIPTION,
+		epilog = EXAMPLES,
+		formatter_class=argparse.RawDescriptionHelpFormatter,
+	)
+	parser.add_argument("identifiers", nargs="+", help="indicate which password to generate")
+	parser.add_argument("-l", "--length", type=int, default=15, help="maximum length of generated password (default: %(default)s)")
+	parser.add_argument("-t", "--type", choices=["normal", "numeric"], default="normal", help="type of password to generate (default: %(default)s)")
+	parser.add_argument("--version", action="version", version=PROGRAM),
+	args = parser.parse_args()
+	if args.length <= 0:
+		parser.error("argument -l/--length: LENGTH must be greater than 0")
+		sys.exit(1)
+	return args
+
+def get_master_password():
+	"""
+	Get the master password from the user with the given prompt.
+	"""
+	def get(prompt):
+		return getpass.getpass(prompt + ": ")
+	master_password = get("Master password")
+	if master_password == "":
+		print("No password given, aborting!", file=sys.stderr)
+		sys.exit(1)
+	verify_password = get("Verify password")
+	if master_password != verify_password:
+		print("Passwords mismatch, aborting!", file=sys.stderr)
+		sys.exit(1)
+	return master_password
+
+def generate_hash(text):
+	"""
+	Generate a secure hash using the given text.
+	"""
+	return hashlib.sha512(text.encode("UTF-8")).digest()
+
+def normalize_text(text):
+	"""
+	Normalize the given text.
+	"""
+	return unicodedata.normalize("NFD", text)
+
+def generate_plaintext(master_password, identifiers):
+	"""
+	Generate the plaintext message using the given password and identifiers.
+	"""
+	return normalize_text(
+		master_password + "\x00" +
+		"\x00".join(identifiers)
+	)
+
+def encode_base10(data):
+	"""
+	Convert the given data to base10.
+	"""
+	value = int.from_bytes(data, "little")
+	encoded = ""
+	while value > 0:
+		encoded += chr(0x30 + value % 10)
+		value   = value // 10
+	return encoded
+
+def encode_base94(data):
+	"""
+	Convert the given data to base94.
+	"""
+	value = int.from_bytes(data, "little")
+	encoded = ""
+	while value > 0:
+		encoded += chr(0x21 + value % 94)
+		value   = value // 94
+	return encoded
+
+def generate_password(master_password, identifiers, length, type):
+	plaintext = generate_plaintext(master_password, identifiers)
+	hash = generate_hash(plaintext)
+	if type == "numeric": password = encode_base10(hash)
+	else:                 password = encode_base94(hash)
+	return password[:length]
+
+def main():
+	args = get_arguments()
+	master_password = get_master_password()
+	password = generate_password(
+		master_password=master_password,
+		identifiers=args.identifiers,
+		length=args.length,
+		type=args.type
+	)
+	print(password)
+
+def self_test():
+	test_cases = [
+		[ "Master Password", ["identifier0", "identifier1"], 1000, "normal", "sozCeWVdA*'B&*Ad<uxh\\0B[p4J+Lo!`FR,c&N1O(I;c)QehTS1wk0tFWzad[/]\>^eU<`Yj@8)>\"V" ],
+		[ "Xyz\\ &*qwer", ["ab", "cd", "e", "--"], 1000, "normal", "@EVf;oYw~D+1FtO/jYhWT!%Y*'O~+end33XCB}Y!OC'.\"~&X{s62CbLs?9uYXHnaxgY(.W1a$j0rv;" ],
+		[ "password", ["example.com"], 1000, "normal", ";$C3x0VK#E`g;&_itmf||sbX;Rk8V}\\k>Fil4~PmEL4F{S0ADctEfY1C9YUuLcXIu^:L[OY[T;@INE" ],
+		[ "password", ["example.com"], 15, "normal", ";$C3x0VK#E`g;&_"],
+		[ "password", ["example.com"], 14, "normal", ";$C3x0VK#E`g;&"],
+		[ "password", ["example.com"], 13, "normal", ";$C3x0VK#E`g;"],
+		[ "password", ["example.com"], 8, "normal", ";$C3x0VK"],
+		[ "password", ["example.com"], 3, "normal", ";$C"],
+		[ "password", ["example.com"], 1, "normal", ";"],
+		[ "password", ["example.com"], 1000, "numeric", "8204887089211007539884582289452238817870077225951396591613328427951849602650362919004561986192708112484466838934608966834974877506177442656500515417721113" ],
+		[ "password", ["example.com"], 15, "numeric", "820488708921100" ],
+		[ "password", ["example.com"], 14, "numeric", "82048870892110" ],
+		[ "password", ["example.com"], 13, "numeric", "8204887089211" ],
+		[ "password", ["example.com"], 8, "numeric", "82048870" ],
+		[ "password", ["example.com"], 3, "numeric", "820" ],
+		[ "password", ["example.com"], 1, "numeric", "8" ],
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed precomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # decomposed precomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed decomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # decomposed decomposed
+	]
+	for master_password, identifiers, length, type, expected_password in test_cases:
+		actual_password = generate_password(
+			master_password=master_password,
+			identifiers=identifiers,
+			length=length,
+			type=type
+		)
+		if actual_password != expected_password:
+			print("ARGH! Self test failed! Something is wrong! Do not use!", file=sys.stderr)
+			sys.exit(1)
+
+self_test()
+main()
