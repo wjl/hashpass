@@ -31,9 +31,10 @@ The algorithm is as follows:
 	2. Collect the password identifier strings from the user.
 
 	3. Concatenate the master password and the identifier strings, separated by
-		 null characters.
+		 null characters, and normalize it to Unicode NFD.
 
-	4. Take the concatenated plain text and compute the SHA-512 digest.
+	4. Take the concatenated plain text and compute the SHA-512 digest over it as
+		 UTF-8 data.
 
 	5. Convert to the digest to base-94 or base-10, as requested by the user.
 
