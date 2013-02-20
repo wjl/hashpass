@@ -22,7 +22,7 @@ import hashlib
 import sys
 import unicodedata
 
-PROGRAM = "Hashpass v1.0.0"
+PROGRAM = "Hashpass v1.1.0"
 DESCRIPTION = (
 """%s
 
@@ -40,6 +40,9 @@ examples:
   Very long admin password for a database:
     hashpass --length 50 database admin
 
+  Password using only letters and numbers for a legacy system:
+    hashpass legacy system --type alphanumeric
+
   Pin number for voice mail which only allows several digits:
     hashpass voicemail --type numeric --length 6
 """
@@ -56,7 +59,7 @@ def get_arguments():
 	)
 	parser.add_argument("identifiers", nargs="+", help="indicate which password to generate")
 	parser.add_argument("-l", "--length", type=int, default=15, help="maximum length of generated password (default: %(default)s)")
-	parser.add_argument("-t", "--type", choices=["normal", "numeric"], default="normal", help="type of password to generate (default: %(default)s)")
+	parser.add_argument("-t", "--type", choices=["normal", "alphanumeric", "numeric"], default="normal", help="type of password to generate (default: %(default)s)")
 	parser.add_argument("--version", action="version", version=PROGRAM),
 	args = parser.parse_args()
 	if args.length <= 0:
@@ -112,6 +115,20 @@ def encode_base10(data):
 		value   = value // 10
 	return encoded
 
+def encode_base62(data):
+	"""
+	Convert the given data to base62.
+	"""
+	value = int.from_bytes(data, "little")
+	encoded = ""
+	while value > 0:
+		digit = value % 62;
+		if   (digit <=  9): encoded += chr(0x30 + digit)
+		elif (digit <= 35): encoded += chr(0x41 + digit - 10)
+		else:               encoded += chr(0x61 + digit - 36)
+		value = value // 62
+	return encoded
+
 def encode_base94(data):
 	"""
 	Convert the given data to base94.
@@ -126,8 +143,9 @@ def encode_base94(data):
 def generate_password(master_password, identifiers, length, type):
 	plaintext = generate_plaintext(master_password, identifiers)
 	hash = generate_hash(plaintext)
-	if type == "numeric": password = encode_base10(hash)
-	else:                 password = encode_base94(hash)
+	if   type ==      "numeric": password = encode_base10(hash)
+	elif type == "alphanumeric": password = encode_base62(hash)
+	else:                        password = encode_base94(hash)
 	return password[:length]
 
 def main():
@@ -144,6 +162,8 @@ def main():
 def self_test():
 	test_cases = [
 		[ "Master Password", ["identifier0", "identifier1"], 1000, "normal", "sozCeWVdA*'B&*Ad<uxh\\0B[p4J+Lo!`FR,c&N1O(I;c)QehTS1wk0tFWzad[/]\>^eU<`Yj@8)>\"V" ],
+		[ "Master Password", ["identifier0", "identifier1"], 1000, "alphanumeric", "gIFVmWFBnMPPd1um2hz0uCTiijJWunUlEtQCx6cIW6JLO74PjBHkbhdH4sdr528443VAYhdEMX8nR9iA3USb2K" ],
+		[ "Master Password", ["identifier0", "identifier1"], 1000, "numeric", "8189979382856339561014163655613807968091303399689214759057046462588582700447356232256600409150775706828361127768805199083900979493467068268717276132001254" ],
 		[ "Xyz\\ &*qwer", ["ab", "cd", "e", "--"], 1000, "normal", "@EVf;oYw~D+1FtO/jYhWT!%Y*'O~+end33XCB}Y!OC'.\"~&X{s62CbLs?9uYXHnaxgY(.W1a$j0rv;" ],
 		[ "password", ["example.com"], 1000, "normal", ";$C3x0VK#E`g;&_itmf||sbX;Rk8V}\\k>Fil4~PmEL4F{S0ADctEfY1C9YUuLcXIu^:L[OY[T;@INE" ],
 		[ "password", ["example.com"], 15, "normal", ";$C3x0VK#E`g;&_"],
@@ -159,6 +179,13 @@ def self_test():
 		[ "password", ["example.com"], 8, "numeric", "82048870" ],
 		[ "password", ["example.com"], 3, "numeric", "820" ],
 		[ "password", ["example.com"], 1, "numeric", "8" ],
+		[ "password", ["example.com"], 1000, "alphanumeric", "kHqOsyblj8pg9vn55IUwuiKTrPWsnvDPbjnjq4ZxiyA5zLpcdqlyS6FsB55ZLu6ENb8FosuqxsT7otLyApc8nD" ],
+		[ "password", ["example.com"], 15, "alphanumeric", "kHqOsyblj8pg9vn" ],
+		[ "password", ["example.com"], 14, "alphanumeric", "kHqOsyblj8pg9v" ],
+		[ "password", ["example.com"], 13, "alphanumeric", "kHqOsyblj8pg9" ],
+		[ "password", ["example.com"], 8, "alphanumeric", "kHqOsybl" ],
+		[ "password", ["example.com"], 3, "alphanumeric", "kHq" ],
+		[ "password", ["example.com"], 1, "alphanumeric", "k" ],
 		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed precomposed
 		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # decomposed precomposed
 		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed decomposed

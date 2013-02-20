@@ -12,6 +12,9 @@ Examples:
   Very long admin password for a database:
     hashpass --length 50 database admin
 
+  Password using only letters and numbers for a legacy system:
+    hashpass legacy system --type alphanumeric
+
   Pin number for voice mail which only allows several digits:
     hashpass voicemail --type numeric --length 6
 
@@ -36,12 +39,14 @@ The algorithm is as follows:
   4. Take the concatenated plain text and compute the SHA-512 digest over it as
      UTF-8 data.
 
-  5. Convert to the digest to base-94 or base-10, as requested by the user.
+  5. Convert to the digest to base-94, base-62, or base-10, as requested by the user.
 
   6. Give the generated password back to the user, possibly truncating it to
      the length requested by the user.
 
-Our base-94 digits are the characters '!' to '~' in order; our base-10 digits
-are the characters 0 to 9 in order. Either way, our base conversion is done by
-treating the SHA-512 digest as a little-endian unsigned integer and then
-repeatedly taking the remainer and dividing.
+Our base-94 digits are the characters '!' to '~' in order. Our base-62 digits
+are the characters '0' to '9' in order, followed by 'A to 'Z' in order, finally
+'a' to 'z' in order. Our base-10 digits are the characters '0' to '9' in order.
+In any case, our base conversion is done by treating the SHA-512 digest as a
+little-endian unsigned integer and then repeatedly taking the remainer and
+dividing.
