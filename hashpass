@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 # Hashpass -- generate passwords on-the-fly
-# Copyright © 2012 Wesley J. Landaker <wjl@icecavern.net>
+# Copyright © 2014 Wesley J. Landaker <wjl@icecavern.net>
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,29 +22,38 @@ import hashlib
 import sys
 import unicodedata
 
-PROGRAM = "Hashpass v1.1.0"
+PROGRAM = "Hashpass v1.2.0"
 DESCRIPTION = (
 """%s
 
-Generate passwords on-the-fly using a master password and identifiers."""
+Generate passwords on-the-fly using a master password and identifiers.
+"""
 ) % (PROGRAM)
 EXAMPLES = (
 """
-examples:
-  Password for example.com:
-    hashpass example.com
+Examples:
 
-  My password for example.com's separate bug tracker:
-    hashpass example.com bugs
+	Password for example.com:
+		hashpass example.com
 
-  Very long admin password for a database:
-    hashpass --length 50 database admin
+	My password for example.com's separate bug tracker:
+		hashpass example.com bugs
 
-  Password using only letters and numbers for a legacy system:
-    hashpass legacy system --type alphanumeric
+	Very long admin password for a database:
+		hashpass --length 50 database admin
 
-  Pin number for voice mail which only allows several digits:
-    hashpass voicemail --type numeric --length 6
+	Password using only letters and numbers for a legacy system:
+		hashpass legacy system --type alphanumeric
+
+	Pin number for voice mail which only allows several digits:
+		hashpass voicemail --type numeric --length 6
+
+	Print out the master password hash:
+		hashpass --print-master-password-hash
+
+	Password for example.com, using the master password hash for 'password':
+		hashpass example.com --master-password-hash VNcvd6qzEJUgV7c9ZvpKGLD4JBYopsjo5JNrO2vg3tg6VMTi4N78tKfzMRTy4sqzyc0Yad3qYk4tlSqJowaYHV
+
 """
 )
 
@@ -56,20 +65,39 @@ def get_arguments():
 		description = DESCRIPTION,
 		epilog = EXAMPLES,
 		formatter_class=argparse.RawDescriptionHelpFormatter,
+		add_help=False,
 	)
-	parser.add_argument("identifiers", nargs="+", help="indicate which password to generate")
-	parser.add_argument("-l", "--length", type=int, default=15, help="maximum length of generated password (default: %(default)s)")
-	parser.add_argument("-t", "--type", choices=["normal", "alphanumeric", "numeric"], default="normal", help="type of password to generate (default: %(default)s)")
-	parser.add_argument("--version", action="version", version=PROGRAM),
+
+	operations_group = parser.add_argument_group(title="Mode")
+	operations = operations_group.add_mutually_exclusive_group(required=False)
+	operations.add_argument("--print-password", action="store_true", help="print password based on master password and identifiers (default)")
+	operations.add_argument("--print-master-password-hash", action="store_true", help="prompt for the master password and print its hash")
+	operations.add_argument("--version", action="version", version=PROGRAM),
+	operations.add_argument("-h", "--help", action="help", help="print this help message")
+
+	parameters = parser.add_argument_group(title="Parameters")
+	parameters.add_argument("-l", "--length", type=int, default=15, help="maximum length of generated password (default: %(default)s)")
+	parameters.add_argument("-t", "--type", choices=["normal", "alphanumeric", "numeric"], default="normal", help="type of password to generate (default: %(default)s)")
+	parameters.add_argument("--master-password-hash", metavar="HASH", help="provide the hash to verify the master password against instead of prompting for the password twice")
+	parameters.add_argument("identifiers", nargs="*", help="indicate which password to generate")
 	args = parser.parse_args()
 	if args.length <= 0:
 		parser.error("argument -l/--length: LENGTH must be greater than 0")
 		sys.exit(1)
+	if not args.print_master_password_hash and len(args.identifiers) < 1:
+		parser.error("no identifiers provided")
+		sys.exit(1)
 	return args
 
-def get_master_password():
+def get_master_password(expected_master_password_hash=None):
 	"""
 	Get the master password from the user with the given prompt.
+
+	To verify the user has typed the password correctly, we either check what
+	they typed against a known master password hash, or we ask ask them to type
+	it again.
+
+	Either way, we return the master password & the corresponding hash.
 	"""
 	def get(prompt):
 		return getpass.getpass(prompt + ": ")
@@ -77,11 +105,16 @@ def get_master_password():
 	if master_password == "":
 		print("No password given, aborting!", file=sys.stderr)
 		sys.exit(1)
-	verify_password = get("Verify password")
-	if master_password != verify_password:
-		print("Passwords mismatch, aborting!", file=sys.stderr)
+	input_master_password_hash = generate_master_password_hash(master_password)
+	if expected_master_password_hash:
+		verify_password = master_password
+	else:
+		verify_password = get("Verify password")
+		expected_master_password_hash = generate_master_password_hash(verify_password)
+	if (master_password != verify_password) or (input_master_password_hash != expected_master_password_hash):
+		print("Password mismatch, aborting!", file=sys.stderr)
 		sys.exit(1)
-	return master_password
+	return master_password, input_master_password_hash
 
 def generate_hash(text):
 	"""
@@ -94,6 +127,9 @@ def normalize_text(text):
 	Normalize the given text.
 	"""
 	return unicodedata.normalize("NFD", text)
+
+def generate_master_password_hash(master_password):
+	return encode_base62(generate_hash(normalize_text(master_password)))
 
 def generate_plaintext(master_password, identifiers):
 	"""
@@ -150,16 +186,22 @@ def generate_password(master_password, identifiers, length, type):
 
 def main():
 	args = get_arguments()
-	master_password = get_master_password()
-	password = generate_password(
-		master_password=master_password,
-		identifiers=args.identifiers,
-		length=args.length,
-		type=args.type
-	)
-	print(password)
+	master_password, master_password_hash = get_master_password(args.master_password_hash)
+	if args.print_master_password_hash:
+		print(master_password_hash)
+		sys.exit(0)
+	else:
+		password = generate_password(
+			master_password=master_password,
+			identifiers=args.identifiers,
+			length=args.length,
+			type=args.type
+		)
+		print(password)
 
 def self_test():
+
+	# Core password generation tests.
 	test_cases = [
 		[ "Master Password", ["identifier0", "identifier1"], 1000, "normal", "sozCeWVdA*'B&*Ad<uxh\\0B[p4J+Lo!`FR,c&N1O(I;c)QehTS1wk0tFWzad[/]\>^eU<`Yj@8)>\"V" ],
 		[ "Master Password", ["identifier0", "identifier1"], 1000, "alphanumeric", "gIFVmWFBnMPPd1um2hz0uCTiijJWunUlEtQCx6cIW6JLO74PjBHkbhdH4sdr528443VAYhdEMX8nR9iA3USb2K" ],
@@ -187,9 +229,9 @@ def self_test():
 		[ "password", ["example.com"], 3, "alphanumeric", "kHq" ],
 		[ "password", ["example.com"], 1, "alphanumeric", "k" ],
 		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed precomposed
-		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # decomposed precomposed
-		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed decomposed
-		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # decomposed decomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], #  decomposed precomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], # precomposed  decomposed
+		[ "é", ["ü"], 15, "normal", "1jES-Zu9utpZhAC" ], #  decomposed  decomposed
 	]
 	for master_password, identifiers, length, type, expected_password in test_cases:
 		actual_password = generate_password(
@@ -199,6 +241,22 @@ def self_test():
 			type=type
 		)
 		if actual_password != expected_password:
+			print("ARGH! Self test failed! Something is wrong! Do not use!", file=sys.stderr)
+			sys.exit(1)
+
+	# Master password has test cases.
+	test_cases = [
+		["Master Password", "DGVurdjHRMBL7woU6ILWRRdMaD1x21ojwsJMaEbzjAKizf7L59wEG2rDdsgHfq39nGDu8bEfaR2GtT26SGDReQ"],
+		["Xyz\\ &*qwer", "dFsWxAhzRV2EznILLmupsn0W98wkSGPyQ0JJ4uHWMHqKAw9L3bzZFyfy6iiiaxFzjL5NLLeF4kUr8EOvTbfeX5"],
+		["password", "VNcvd6qzEJUgV7c9ZvpKGLD4JBYopsjo5JNrO2vg3tg6VMTi4N78tKfzMRTy4sqzyc0Yad3qYk4tlSqJowaYHV"],
+		[ "éü", "uMNyJLWIi6Pw5dOKkELNeeJPvhpBEzIUzuRGEyEsSgi2MhO6bCypjTdHuNWKAAxCbEwZT1omNyV14cHXN6lpnB" ], # precomposed precomposed
+		[ "éü", "uMNyJLWIi6Pw5dOKkELNeeJPvhpBEzIUzuRGEyEsSgi2MhO6bCypjTdHuNWKAAxCbEwZT1omNyV14cHXN6lpnB" ], #  decomposed precomposed
+		[ "éü", "uMNyJLWIi6Pw5dOKkELNeeJPvhpBEzIUzuRGEyEsSgi2MhO6bCypjTdHuNWKAAxCbEwZT1omNyV14cHXN6lpnB" ], # precomposed  decomposed
+		[ "éü", "uMNyJLWIi6Pw5dOKkELNeeJPvhpBEzIUzuRGEyEsSgi2MhO6bCypjTdHuNWKAAxCbEwZT1omNyV14cHXN6lpnB" ], #  decomposed  decomposed
+	]
+	for master_password, expected_master_password_hash in test_cases:
+		actual_master_password_hash = generate_master_password_hash(master_password)
+		if actual_master_password_hash != expected_master_password_hash:
 			print("ARGH! Self test failed! Something is wrong! Do not use!", file=sys.stderr)
 			sys.exit(1)
 
