@@ -58,7 +58,7 @@ In any case, our base conversion is done by treating the SHA-512 digest as a
 little-endian unsigned integer and then repeatedly taking the remainer and
 dividing.
 
-Master password hashes can optionally generated and then used to verify the
+Master password hashes can optionally be generated and then used to verify the
 input master password without the necessity of typing the master password twice
 on every use.
 
